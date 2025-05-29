@@ -1,0 +1,552 @@
+---
+title: "AutoMaxent: Automatic species distribution modelling using Maximun Entropy approach"
+author: "Gonzalo Albaladejo-Robles"
+date: "2025-05-20"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+bibliography: references.bib
+---
+
+### Project options
+
+When dealing with high volumes of data it is important to allocate more memory to *Java* so wen can load this information into **MaxEnt**
+
+```{r Options, echo=T, include=T, message=F, warning=F, results='hide'}
+rm(list=ls())
+gc()
+#.rs.restartR()
+options(java.parameters = "-Xmx5g") # increase the memory space for Java before loading any package (this is important to 
+                                    # allow for big datasets to be used by MaxEnt)
+options("rgdal_show_exportToProj4_warnings"="none") # Silence packages updates warnings
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path)) # Set the working directory to the directory in which the code is stored
+td<-tempdir()
+dir.create(td,showWarnings = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+### Set up the R environment
+
+```{r Setup environment, echo=T, include=T,message=F,warning=F,results='hide'}
+# 0.a Load the packages needed ----
+list.of.packages<-c("dplyr","sf","data.table","terra","tidyr","parallel","purrr","MASS","nnet","biomod2",
+                    "data.table","doParallel","rJava","rstudioapi","raptr","dismo","randomForest","caret")
+
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+lapply(list.of.packages,require,character.only=TRUE)
+rm(list.of.packages,new.packages)
+
+# 0.1 Load the functions to run the analysis ----
+  functions<-"./Functions" %>% list.files(recursive = FALSE,pattern = ".R$",full.names = TRUE)
+  lapply(functions,function(x) source(x))
+
+```
+
+# Species distribution models in R
+
+Species Distribution Models (**SDM's**) use a combination of presence and absence/background data to establish the relationships between species spatial records and environmental gradients (). Once defined, these relationships would define the species potential/realized or "real" niche of the species and allow us to extrapolate this niche into space. The configuration of environmental variables, the distribution and number of presence points and the selection of background or pseudo-absence data would have an impact on our niche modelling.
+
+## MaxEnt
+
+**MaxEnt** is a presence-only species distribution modelling algorithm that uses species presence information, alongside spatial environmental information to reconstruct and project their niche [@phillips2006]. This method shows a series of advantages when compared to other SDM approaches:
+
+1.  Is a semi-unsupervised machine learning algorithm, which makes it easy to implement and able to work with scarce data.
+2.  is a well-tested method, extensively used in ecology and conservation and able to produce more accurate results than other SDM methods.
+3.  it can work with highly multidimensional data
+4.  it offers access to base parametrisation and optimization, which make it flexible and customisable.
+
+All this makes it ideal for building a user friendly and semi-automated protocol to run species distribution models.
+
+# The AutoMaxent function
+
+This function is designed to provide a fast and flexible combination of tools to streamline most of the different steps needed to format and process the data to run any species distribution model. Additionally, it provides direct control over several aspects that have an impact on the performance, theoretical framework, and overall performance of **MaxEnt**. Most of these operations are run internally by the function and can be modified using the list of parameters included in the function. Through this document, we are going to explore how the different parameters impact how data is formatted previous to the analysis, and the series of internal decisions the algorithm takes for us. 
+
+Before getting into the details of `Auto_maxent` we are going to load some spatial information into our working environment. This would be a combination of climatic variables derived from [BioClim](https://www.worldclim.org/data/bioclim.html) and spatial presence records for our target species, in this case *Microtus subterraneus*. Species records have been directly downloaded from [GBIF](https://www.gbif.org/).
+
+```{r Data for analysis,message=F,warning=F,echo=T}
+# a. Species points----
+  sf_use_s2(FALSE)
+  Species_list <- list.files("./Data/Sp_info/Records",pattern = "Microtus subterraneus.csv",full.names = TRUE)
+  presence_dat <- Species_list %>% read.csv()
+  
+  Sp_points <- presence_dat %>%   st_as_sf(coords=c("decimalLongitude","decimalLatitude"))
+  
+# b. Species spatial information----
+  IUCN_ranges <- "./Data/Sp_info/Ranges/Sp_ranges.shp" %>% st_read()
+
+# b.1 Analysis study area----
+  "./Data/Study_area" %>% dir.create(showWarnings = F,recursive = T)
+  worldPol <- geodata::world(resolution = 5,path="./Data/Study_area") %>%   st_as_sf() %>% st_make_valid()
+
+  sty_area <- st_crop(worldPol, st_bbox(IUCN_ranges) %>% st_as_sfc()) %>% st_union()
+  
+# c. Get the environmental information----
+  "./Data/Env_vars" %>% dir.create(showWarnings = F,recursive = T)
+  bio_w <- geodata::worldclim_global(var="bio",res=2.5,path=tempdir())
+  writeRaster(bio_w,paste("./Data/Env_vars","wordClim.tif",sep="/"),overwrite=T)
+  
+  bio_w <- rast(paste("./Data/Env_vars","wordClim.tif",sep="/"))
+  bio_sty <- crop(bio_w,sty_area %>% st_union() %>% vect())
+
+# d. Remove points outside the IUCN range of the species----  
+  st_crs(Sp_points) <- st_crs(bio_w)
+  Sp_points <- Sp_points %>% st_transform(crs=st_crs(bio_w)) 
+  
+  p_index <- st_intersects(Sp_points,IUCN_ranges %>% st_union(),sparse=F)
+  Sp_points <- Sp_points[p_index,]
+  
+```
+
+-   Let's have a look at the data for the analysis!
+
+```{r env_data, echo=T,message=F,warning=F,fig.cap="GBif distribution data"}
+par(mar=c(0,0,0,0))
+
+plot(bio_sty$wc2.1_2.5m_bio_1,axes=F,mar=c(3.5,2.5,2.5,2.5),col=viridis::inferno(250),plg=list(x="bottom",size=0.7,title="Bio 1",line=-5))
+plot(sty_area %>% st_geometry(),add=T) ; plot(IUCN_ranges %>% st_geometry(),add=T,border="grey88",lwd=1.2,lty=3) # Add the polygon information
+
+points(Sp_points,pch=19)
+mtext(side=2,adj=0,"Distribution data for Microtus arvalis")
+legend("top",legend=c("records","IUCN range"),pch=19,col=c("black","grey88"),horiz=T,bty="o")
+
+```
+
+```{r Remove redundant data, echo=F,include=F,message=F,warning=F}
+rm(Sp_points,p_index,Species_list)
+```
+
+# AutoMaxent Parameters
+
+In its current state, the **AutoMaxent** function includes **29** different arguments and parameters that allow the user to modify different aspects of the data, variable selection, model execution and selection/averaging, as well as model export and parameter calculations. The different combinations of these parameters would yield slightly different **MaxEnt** models with distinct performance and explanatory power.
+
+## Parameters and functionallity:
+
+### Base data formatting
+
+-   `spp_points`, `coords.p`, `crs.p`, `min_obs`, and `rm.dp`: presence points for the species. It can be a `SpatialPoints` object or any other `sf` object with the `POINT` type geometry. If `spp_points` is a `data.frame` containing the presence records, `coords.p` needs to denote the names of columns within the `data.frame` that contains the lon/lat or X/Y coordinates of the `point = CHARACTER` string of the form c(Y,Y). The `crs.r` parameter is used to project the point data to the desired CRS. If the final number of observations is lower than that marked by min_obs the function stops and a message is returned. Additionally the `rm.dp` (`TRUE`/`FALSE`) argument removes duplicated geometries.
+
+Format of spatial data when downloaded directly from **GBIF**, The default values of most of the aforementioned parameters are set up to work with **GBIF** data.
+
+```{r Point data formatting,include=T,echo=T,message=F,warning=F}
+# Format of spatial data when downloaded directly from GBIF
+head(presence_dat[,1:15]) # Print the first 10 rows of the 15 first columns
+```
+
+-   The `data.frame` is coerce into an `sf` object using the `coords.p` and `crs.p` parameters. The `name.mod` parameter is needed for some messages but this is, if not defined, automatically extracted form the data.
+
+```{r Point data formatting and filtering,message=F,warning=F}
+# Parameters
+min_obs <- 20
+crs.r <- "EPSG:4326" # WGS84 is the default crs for GBIF data
+coords.p <- c("decimalLongitude","decimalLatitude")
+rm.dp = TRUE
+name.mod = unique(presence_dat$species)
+
+# Format & filtering the presence data----
+  if(nrow(presence_dat) < min_obs){
+    #print()
+    stop(paste("Number of points below threshold for",name.mod,sep=" "))
+    
+  }else{
+    if("sf" %in% class(presence_dat)){
+      y_points <- presence_dat
+      y_points <- y_points %>% st_transform(crs=crs.r)
+      
+    }else{
+      print(paste("Preparing spatial information for",name.mod,sep=" "))
+      y_points <- presence_dat %>% st_as_sf(coords=coords.p,crs=crs.r)
+    }
+  }
+  
+  # 1.b Remove duplicates----
+  if(rm.dp){
+    y_points <- y_points[!duplicated(y_points %>% st_geometry()),]
+    
+    if(nrow(y_points) < min_obs){
+      stop(paste("Number of points below threshold for",name.mod,sep=" "))
+      
+    }
+  }
+  
+```
+
+-   Final set of observations
+
+```{r final set of observations,message=F,warning=F,fig.cap="Distribution data"}
+par(mar=c(0,2.5,4,0))
+plot(sty_area%>%st_geometry)
+plot(y_points %>% st_geometry(),pch=21,bg="tomato" %>% adjustcolor(alpha.f = 0.25),add=T,col=NA)
+```
+
+-   **predictors**: predictors or environmental variables in the form a `rast` (consider that the `raster` package will be no longer supported) or `rasterstack` `terra` object.
+
+### Background data and study area
+
+Both the background sampling area and study area definition, on which the model simulations are going to be projected, are configured in the same step using a combination of 8 parameters. The `sp_range`, `buff_lim`, and `world_pol` parameters feed the spatial data into the function and define the extension and detailed shape of the study and sampling area. `sp_range` needs to be an `sf` or `POLYGON` object defining the basic range of the species. If no geometry is presented, this parameter will take a `NULL` value and a minimum complex polygon will be calculated using the distribution of records of the species.
+
+Once we have our species spatial distribution loaded, we can apply a buffer around this area using the `buff_lim` parameter. This parameter takes numeric values and represents the distance in map units that we want to apply to our buffer. By default, this parameter takes a value of `0`. Sometimes we are interested in including a buffer around our study area. If we want, for example, to include more environmental information into our sampling area. However, this can cause our geometry to fall into areas we are not interested in or that are unreachable for our species, (e.g. the sea/ocean for a terrestrial species). To refine the study area we can use the `world_pol` parameter. This parameter uses a geometry defined by the user to crop the study area specified by `sp_range` and `buff_lim`. By default, this parameter takes a value of `0` but it can take any `sf` object.
+
+```{r ,include=T,echo=F,message=F,warning=F}
+par(mar=c(3,2.5,2.5,2.5))
+sp_range = IUCN_ranges
+world_pol <- sty_area
+
+buff_lim = 2                # It is important the format the distance paramter into the units we want to use,
+# units(buff_lim) <- "km"   # otherwise the units would be extract from the maps or spatial CRS projection which
+                            # may differ from what we want.
+
+# a. MCP from points ----
+    p.index <- chull(y_points %>% st_coordinates())
+    xy.hull <- st_coordinates(y_points)[c(p.index,p.index[1]),]
+    
+    sp.pol <- st_sf(data.frame(ID=1,geom=st_sfc(st_polygon(list(xy.hull)))),crs=crs.r)
+    sp.pol <- sp.pol %>% st_cast("POLYGON") %>% st_geometry()
+    
+    # Get the study area (bounding box)
+    sty.a <- sp.pol %>% st_bbox() %>% poly_from_ext(crs_p = NULL)
+    st_crs(sty.a) <- crs.r ; sty.a <- sty.a %>% st_transform(crs.r)
+  
+    # Display the information
+    plot(sty_area %>% st_geometry())
+    plot(sp.pol,add=T,border="tomato",lty=3)
+    plot(sty.a,add=T,border="skyblue3",lwd=1.5)
+    
+    mtext(side=3,adj=0,"sp_range = NULL, buff_lim=0",cex=0.5,line=-4)
+    
+# b. Regular study area with no buffer----    
+    # Check intersection between points and species range/study area polygon
+    sp.pol <- sp_range
+    sp.pol <- sp.pol %>% st_cast("POLYGON") %>% st_geometry()
+    
+    xy<-sp.pol %>% st_intersects(x=y_points,sparse = TRUE) %>% unlist() %>% unique()
+    
+    sp.pol <- sp.pol[xy]
+    
+    # Get the study area (bounding box)
+    sty.a <- sp.pol %>% st_bbox() %>% poly_from_ext(crs_p = crs.r)
+    
+    # Display the information
+    plot(sty_area %>% st_geometry())
+    plot(sp.pol,add=T,border="tomato",lty=3)
+    plot(sty.a,add=T,border="skyblue3",lwd=1.5)
+    
+    mtext(side=3,adj=0,"sp_range = IUCN_range, buff_lim=0",cex=0.5,line=-4)
+    
+    # c. Add a buffer around the study area and refine it using the worl_pol
+    sty.c <- sty.a %>% st_buffer(dist=buff_lim,endCapStyle = "FLAT")
+  
+    # Refine the study area by removing the portions that fall into the ocean
+    if(!is.null(world_pol)){
+      world_pol <- world_pol %>% st_transform(crs.r)
+      sty.b <- sty.c %>% st_intersection(world_pol)
+    }
+    
+    plot(sty_area %>% st_geometry())
+    plot(sp.pol,add=T,border="tomato",lty=3)
+    plot(sty.b,add=T,border="skyblue3",lwd=1.5)
+    
+    mtext(side=3,adj=0,"sp_range = IUCN_range, buff_lim=2 degrees",cex=0.5,line=0)
+
+```
+
+-   The number of background points we are going to create and the way we do it are controlled by 4 parameters; `n_bk` defines the number of background points we want to create, it can be a number of a character field `AUTO` that automatically calculates the number of background points to create ; `prop_env` if `n_bk = AUTO` the number of background points is selecting by calculating the proportion of environmental cells we want to sample; the `type_bk` parameter controls how background points are sampled within the study area. This factor can take four values:
+
+    1.  `Random` = points are randomly distributed across the study area.
+    2.  `BwData` = points are distributed using the density matrix define by the presence data.
+    3.  `BwData_inv` = background points are sampled using the inverse of the presence density matrix.
+    4.  `EnvBk` = points are sampled based on a density kernel matrix calculated using the location of the score values derived from the first 2 axes of a PCA derived from the environmental data.
+
+-   The last parameter that is relevant for the data formatting is `Test_n` which controls the proportion of data (presence and background data) the is separated for model testing and training. A value of 30 means that 30% of the presence and background data is separated for model testing whereas the remaining 70% is used for model training.
+
+How does the different types of background sampling looks like?
+
+```{r, echo=T,include=T,message=F,warning=F}
+  # Create a set of 10.000 backgroudn points (MaxEnt default)
+    n_bk <- 10000 # use the MaxEnt Default method
+    bk_points_test <- list()
+    pred.dat <- bio_w %>% crop(sty.b %>% vect())
+  
+  # The background point creation is based on the backgrodunPOINTS function, an accesory function of Auto_maxent. With the right imputs this
+  # function can be used independently of Auto_maxent to create background and psudo absence data for any SDM study. Check the function
+  # documentation and paramter description for more details
+    
+    for(i in c("Random","BwData","BwData_inv")){
+      bk_points_test[[i]] <- backgroundPOINTS(presence = y_points,
+                                    background_n = n_bk,
+                                    TrainTest = 1, # We can decide to divide the data at this stage, however for the Auto_maxent function we
+                                                   # are going to use one of the MaxEnt internal arguments
+                                    range_samp = sty.b,
+                                    weights.p = i)$Train
+    }
+    
+  # A different function is used for the EnvBk calculations  
+    bk_points_test[["Env"]] <- bk_env(p.points=y_points,
+                                  env_var=pred.dat,
+                                  n_bk=n_bk,
+                                  density_pc=TRUE)[["points"]] %>% st_cast("POINT")
+    
+```
+
+```{r fig.cap = "Types of background data"}
+par(mar=c(3.5,0,0,0))
+
+for(i in 1:4){
+  plot(sty_area %>% st_geometry())  
+  points(bk_points_test[[i]][sample(1:10000,1000),],cex=0.8,col="skyblue")
+  points(y_points,cex=0.8,col="tomato" %>% adjustcolor(alpha.f = 0.15))
+  mtext(side=2,paste0("Background points using\n",names(bk_points_test)[i]," sampling"),line=-6)
+  legend("bottom",legend=c("Presence","Background"),col=c("tomato","skyblue"),pch=19,horiz=T,title="Type of Record")
+    }
+
+```
+
+## Variable selection, time and Spatio-Temporal matching
+
+Another step implemented within the `Auto_maxent` is the environmental variable selection and time-matching process. The time matching allows the GBIF or species presence data and the environmental information to be spatiotemporally synchronised in order to include all the available heterogeneity in the analysis. The time matching is achieved using the `Time_matchine` function. Although this is an independent function, its functionality is built into the `Auto_maxent` function through 5 parameters:
+
+  1.  `time_macth` = Logical argument (`T`/`F`) that marks if data need to be spatio-temporally coordinated.
+
+  2.  `field_data` = Variable name containing the dates in the GBIF data.
+
+  3.  `time_units` = Main time units in which time-lags are measured year, months, and days.
+
+  4.  `time_lag` = The time-lag to aggregate the environmental data. It works in combination with the `time_units` field to define the time breaks at which environmental information is aggregated. Variables mean values are calculated for each period and then coordinated with the species record information.
+
+  5.  `continuous_data` = If temporal and non-temporal data are included within the environmental information, this field represents the identifier, in the form of a single time-stamp for these variables.
+
+When presence data is temporally coordinated with the environmental data, random points are also created at each time step. This process extracts both presence and background information for each period considered which allows for a better representation of the environmental variation across time. However, given the nature of some of the background sampling, it is recommended to use this parameter in combination with`Random`, `BwData`, and `BwData_inv`. This is due to `EnvBk` using a Principal Component Analysis (**PCA**) approximation to weigh the sampling probabilities of the environmental space. This **PCA** is sensitive to the configuration of the environmental data and also requires a minimum set of observations to calculate the ecological area occupied by the species. When the minimum number of observations for a given period don't meet the requirements of the analysis, this is skipped and the next date/time is tested.
+
+If `select_var = NUMERICAL`, the variable selection is computed using two different parameters, the variable inflation factor (**VIF**) and the Spearman correlation scores. By default, variables are discarded if they present values of **VIF** greater than `5` or correlation values of `0.7`. In this later scenario, only one of the variables with high correlation values are removed (at random). Other methods different from `NUMERIC` are being considered at the moment but have not been implemented in the code. When this parameter is set to `FALSE` all the variables are used for the analysis.
+
+A special case occurs when `select_var!=FALSE` and `time_macth == TRUE`, since the variable selection is based on the data derived from the extraction of background and presence points from the environmental variables, and the configuration of variables has an impact on the **PCA** space, the variable selection needs to happen before the `EnvBk` sampling. In this case, presence and background data are time-matched with the environmental information, and variables are selected following the chosen method (in this case only `NUMERICAL` is available). After this variable selection, the `EnvBk` background sampling with time-matching is performed.
+
+Let's see an example of variable selection for our environmental data:
+
+```{r Variable selection, echo=T,include=T,message=F,warning=F}
+# a. First we need to extract the data from the rasters using the background and presence data----
+  # a.1 Prepare the presence absence vector----
+    bk_points <- bk_points_test[["Random"]]
+    bk_points <- bk_points_test[["Random"]] %>% mutate(presence=0,.before=0) # using the random points as our source
+    y_points <- y_points %>% mutate(presence=1,.before=0)
+    
+    obs_sp <- rbind(y_points %>% dplyr::select("presence"),
+                    bk_points %>% dplyr::select("presence"))
+    
+    obs_index <- obs_sp$presence %>% st_drop_geometry() # Extract the index of 0=absence and 1=presence records
+    
+  # a.2 Extract the values from the environmental variables ----
+    mod.dat <- pred.dat %>% terra::extract(obs_sp %>% vect(),ID=F)
+    
+  # a.3 Remove empty cases from the data----
+    dat.index <- complete.cases(mod.dat)
+    obs_index <- obs_index[dat.index]
+    
+    mod.dat <- mod.dat[dat.index,]
+
+# b. We are going to run the var_select function, that is included withint the Auto_maxent function to run the numerical selection of environmental variables
+    vars_s <- var_select(x=mod.dat,VIF.threshold=5,cor.threshold=0.7)
+    print(paste("The selected variables (",length(vars_s),") are:",paste(vars_s,collapse=" ~ "),sep=" "))
+
+```
+
+It is imperative that the formatting of the environmental data is the right one if you want to perform a spatiotemporal matching of the **GBIF**/Species record data and the environmental information contained in the `spatraster`. Please see the `time_matchine` function for more details.
+
+## Model Parametrization
+
+Now that we have the data, we are going to tune how the model is going to run, how many models we want to produce, and how we want to sort/select such models.
+
+By itself, MaxEnt requires little to almost no adjustment by the user. Default values tend to be robust enough and in most cases, data formatting and quantity had more impact on the models than the fine-tuning we can achieve by playing with the model's internal parameters. Although reliable, this lack of intervention by the user can also produce a lack of variability that in some cases is desirable. Sometimes is preferable to have many good models than just a very good single model. This is the case in most species distribution model scenarios in which we start from conditions that are not ideal to produce something “perfect” (spatial bias in our records, lack of information on the ecology or niche preferences of the species, etc…). In this case, it is more useful to have a variety of models that fit the data differently exploring multiple scenarios of species interactions with its environment. Precisely this is what `Auto_maxent` does. By adjusting 3 parameters we can control the type of fit we want to apply to our data and how tolerant we are with this adjustment:
+
+1.  `random_features` = When set to TRUE, model adjustment features (linear, quadratic, product, and threshold) are set at random, using a maximum of 3 at a time (at least one feature is suppressed/blocked in each model). If this parameter is set to FALSE, all the possible combinations of adjustment features are tested
+
+2.  `beta.val` = This parameter controls the beta parameter or the MaxEnt optimizer. The beta parameter helps to balance model complexity and predictive performance by influencing the regularization multiplier which at the same time controls how much complexity is allowed in the model before we run into over-fitting. By adjusting beta, we can fine-tune the model to ensure we have an adequate generalization of it. Usually lower values of beta result in more complex but tighter models whereas higher values account for more simpler but general models. This parameter takes a single or multiple numerical values. Usually, a range between 1 and 15 is considered adequate for this parameter.
+
+3.  `n.m` = The number of models we want to run. If `random_features` is set to `FALSE`, this parameter is overwritten and all the possible combinations of features and beta-multipliers values are tested.
+
+### Let's run some models using the `Auto_maxent` function
+
+We are going to run some models that:
+
+-   Includes a sampling area with a buffer of 1 degree.
+-   Get the distribution of background data randomly sampled across the study area.
+-   We want to reduce the number of environmental variables (variable selection set to `TRUE`).
+-   We want a total of 3 random models with a fixed beta value of `7`.
+
+```{r echo=T,include=T,message=F,warning=F}
+MaxEnt_models <- Auto_maxent(presence_dat = presence_dat,
+                             predictors = bio_w,
+                             sp_range= IUCN_ranges,
+                             world_pol = worldPol,
+                             random_features = T,
+                             beta.val = 7,
+                             n.m=3,
+                             mod.select = F)
+
+
+```
+
+This might take a while, but we can check the process by checking the messages the function returns. These messages not only inform about the status of the analysis but also return the set of adjustment parameters that are used.
+
+Once our models are finished we can explore the function outputs:
+
+-   `mod.data` = The data used to run the analysis
+
+```{r ,echo=F,include=T}
+MaxEnt_models$mod.data %>% head()
+```
+
+-   `params` = Parameters for each model along with some performance metrics:
+
+  a.  **TSS** = True statistics skill calculated by MaxEnt and externally by a custom function. Probability thresholds for these parameters are also calculated.
+  b.  **AUC** = Area Under the Curve calculated by MaxEnt.
+  c.  **Boyce index** = Classification precision (between 0 and 1).
+
+```{r ,echo=F,include=T}
+MaxEnt_models$params
+```
+
+-   `bk.points` = Background points used for the analysis.
+
+```{r ,echo=T,include=T,fig.cap=" A sample of background points used for the analysis"}
+plot(sty.b)
+MaxEnt_models$bk.points[sample(1:1000,500),] %>% plot(add=T)
+```
+
+-   `mods` = This field contains the individual fitted values.
+
+```{r ,echo=F,include=T}
+MaxEnt_models$mods %>% print()
+
+```
+
+-   `time.data` = the time-matched data used for the analysis. Only returned when `time_macth = TRUE` and the data is correctly formatted.
+-   `AICc` = Weighted Akaike Information Criterion. It is only returned when `mod.select = TRUE`.
+-   `ARGS` = The MaxEnt internal arguments used to fit the individual models.
+
+```{r ,echo=F,include=T}
+MaxEnt_models$ARGS
+
+```
+
+-   `variables` = The set of environmental variables use to fit the model.
+
+```{r ,echo=F,include=T}
+MaxEnt_models$variables
+
+```
+
+-   `study.area` = The polygon/geometry of the study area used to sample the environmental data and run the initial model predictions.
+
+```{r ,echo=F,include=T,message=FALSE,warning=F}
+plot(worldPol %>% st_crop(MaxEnt_models$study.area %>% st_buffer(dist=3)) %>% st_geometry(),col="grey88")
+MaxEnt_models$study.area %>% plot(col="tomato" %>% adjustcolor(alpha.f = 0.45),add=T)
+legend("topleft",legend="Study area",col="tomato",pch=15,bty="n",pt.cex = 1.5)
+```
+
+-   `mod.preds` = This is a `spatraster` stack that contains the model predictions for the environmental data and the study area.
+
+```{r ,echo=F,include=T,message=F,warning=F}
+lt<-layout(matrix(c(rep(1,4),2,3),ncol=3,nrow=2))
+# layout.show(lt)
+par(mar=c(0,0,3,0))
+plot(worldPol %>% st_crop(MaxEnt_models$study.area %>% st_buffer(dist=3)) %>% st_geometry(),col="grey88")
+MaxEnt_models$mod.preds$`Microtus subterraneus_1` %>% plot(col=viridis::inferno(250) %>% adjustcolor(alpha.f = 0.45),add=T,plg=list(x="top",size=0.5))
+
+mtext(side=3,adj=0,"Model 1")
+
+plot(worldPol %>% st_crop(MaxEnt_models$study.area %>% st_buffer(dist=3)) %>% st_geometry(),col="grey88")
+MaxEnt_models$mod.preds$`Microtus subterraneus_2` %>% plot(col=viridis::inferno(250) %>% adjustcolor(alpha.f = 0.45),legend=F,add=T)
+mtext(side=3,adj=0,"Model 2")
+
+plot(worldPol %>% st_crop(MaxEnt_models$study.area %>% st_buffer(dist=3)) %>% st_geometry(),col="grey88")
+MaxEnt_models$mod.preds$`Microtus subterraneus_3` %>% plot(col=viridis::inferno(250) %>% adjustcolor(alpha.f = 0.45),legend=F,add=T)
+mtext(side=3,adj=0,"Model 2")
+
+```
+
+-   `avr.preds` = This is a raster form by averaging all the models. If `mod.select = T` this average is calculated using the best-n models according to the model selection process.
+
+```{r ,echo=F,include=T,message=F,warning=F}
+# layout.show(lt)
+par(mar=c(0,0,3,0))
+plot(worldPol %>% st_crop(MaxEnt_models$study.area %>% st_buffer(dist=3)) %>% st_geometry(),col="grey88")
+MaxEnt_models$avr.preds %>% plot(col=viridis::inferno(250) %>% adjustcolor(alpha.f = 0.45),add=T,plg=list(x="top",size=0.5))
+
+```
+
+### Choosing the best-performing models
+
+Within the `Auto_maxent` function, we have the option to filter and select the models we run in order to only combine or return the models with the best performance. By using the `mod.select = T` parameter we can specify how many models we want to select (using the `n.mods` parameter) and if we want to select these models using only the weighted Akaike information criterion (AICc) values (the default) or the AICc and Boyce index (`use.boyce`).
+
+Let's run some models using the Auto_maxent with the `mod.select = T` function.
+
+Model parameters:
+
+-   Includes a sampling area with a buffer of 1 degree.
+-   Get the distribution of background data randomly sampled across the study area.
+-   We want to reduce the number of environmental variables (variable selection set to `TRUE`).
+-   We want a total of 10 random models with a fixed beta value of 5.
+-   We are going to select and average the 5 best performing models.
+
+```{r echo=T,include=T,message=F,warning=F}
+MaxEnt_select <- Auto_maxent(presence_dat = presence_dat,
+                             predictors = bio_w,
+                             sp_range= IUCN_ranges,
+                             world_pol = worldPol,
+                             random_features = T,
+                             beta.val = 5,
+                             n.m=10,
+                             mod.select = T,
+                             use.boyce = 0.5,
+                             n.mods = 5)
+
+```
+
+-   Check the model results and the differences with the first model
+
+```{r Check model results, echo=F}
+# Parameters for the graph
+lt<-layout(matrix(c(1,2,3,4),ncol=2,nrow=2,byrow = T))
+#layout.show(lt)
+
+# Display the information
+MaxEnt_models$avr.preds %>% plot(col=viridis::mako(250),mar=c(3,1,1,1))
+mtext(side=2,adj=0,"a) Random non-selected model",line=-2,cex=0.5)
+plot(sty_area %>% st_geometry(),add=T) ; plot(IUCN_ranges %>% st_geometry(),border="tomato",lwd=1,add=T)
+
+MaxEnt_select$avr.preds %>% plot(col=viridis::cividis(250),mar=c(3,1,1,1))
+mtext(side=2,adj=0,"b) Random selected model",line=-2,cex=0.5)
+plot(sty_area %>% st_geometry(),add=T) ; plot(IUCN_ranges %>% st_geometry(),border="tomato",lwd=1,add=T)
+
+# Check the difference between the two different models
+mod_comp <- MaxEnt_select$avr.preds - MaxEnt_models$avr.preds
+mod_comp[mod_comp <= 0.01 & mod_comp >= -0.01]<-NA
+
+mod_comp %>% plot(col=viridis::viridis(250),mar=c(3,1,1,1))
+mtext(side=2,adj=0,"c) Selected - non-selected model",line=-2,cex=0.5)
+plot(sty_area %>% st_geometry(),add=T) ; plot(IUCN_ranges %>% st_geometry(),border="tomato",lwd=1,add=T)
+
+# Build the legend and information
+plot(1:10,1:10,axes=F,pch=NA,xlab=NA,ylab=NA)
+legend("left",legend=c("a) No model selection","b) Model reduction/selection","c) M. Selection - No selection","Distribution area"),bty="n",pch=c(NA,NA,NA,0),col=c(NA,NA,NA,"tomato"))
+
+```
+
+-   Check the best-model performance parameters and argument configuration
+
+```{r check model parameters, echo=T}
+# Model performance
+MaxEnt_select$params %>% print()
+MaxEnt_select$AICc %>% print()
+
+# Model parameters
+MaxEnt_select$ARGS %>% print()
+
+```
+
+As shown through this tutorial, the `Auto_maxent` function offers a wide variety of parameters and flexibility on how to configure our study area, background sampling, and model fine-tuning. The different combinations of these fields enable the user to test multiple scenarios for the distribution of species as well as to select which of these scenarios offers a better fit and precision. Although some combinations of parameters are not compatible, this is automatically adjusted and communicated by the function. Some features are yet to be implemented, these are aimed at background sampling optimization and variable selection.
