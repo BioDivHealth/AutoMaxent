@@ -1,6 +1,6 @@
 # AutoMaxent
 
-Rather than a formal package, **AutoMaxent** is a collection of functions that facilitate the general processing and generation of data for Species Distribution Modelling type analysis. Functions can be directly downloaded from this repository or loaded and store in **R** using the following code:
+Rather than a formal package, **AutoMaxent** is a collection of functions that facilitate the general processing and generation of data for Species Distribution Modelling type analysis. Functions can be directly downloaded from this repository or loaded and stored in **R** using the following code:
 
 ```{r}
 # 0. Load/install the needed packages
@@ -33,7 +33,7 @@ Rather than a formal package, **AutoMaxent** is a collection of functions that f
   MyRoute <- paste(getwd(),"AutoMaxent",sep="/")
   
   for(i in 1:nrow(file_path)){
-    write_lines(content(GET(paste0(raw_route,file_path$folder[i],file_path$filename[i]))),
+    write_lines(content(GET(paste(raw_route,file_path$folder[i],file_path$filename[I],sep="/"))),
                 paste(MyRoute,file_path$filename[i],sep="/"))
   }
 
