@@ -29,7 +29,7 @@ Rather than a formal package, **AutoMaxent** is a collection of functions that f
     filter(str_detect(filename,'.R'))
 
 # 3. Configure the routes, download, and export scripts
-  raw_route <- "https://raw.githubusercontent.com/BioDivHealth/AutoMaxent/refs/heads/main" #This is the raw route to the gitHub repository
+  raw_route <- "https://raw.githubusercontent.com/BioDivHealth/AutoMaxent/main" #This is the raw route to the gitHub repository
   MyRoute <- paste(getwd(),"AutoMaxent",sep="/")
   
   for(i in 1:nrow(file_path)){
