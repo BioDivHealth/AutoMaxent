@@ -4,7 +4,7 @@ Rather than a formal package, **AutoMaxent** is a collection of functions that f
 
 ```{r}
 # 0. Load/install the needed packages
-  list.of.packages<-c("httr")
+  list.of.packages<-c("httr","tidyverse")
   
   new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
   if(length(new.packages)) install.packages(new.packages)
@@ -33,7 +33,7 @@ Rather than a formal package, **AutoMaxent** is a collection of functions that f
   MyRoute <- paste(getwd(),"AutoMaxent",sep="/")
   
   for(i in 1:nrow(file_path)){
-    write_lines(content(GET(paste(raw_route,file_path$folder[i],file_path$filename[I],sep="/"))),
+    write_lines(content(GET(paste(raw_route,file_path$folder[i],file_path$filename[i],sep="/"))),
                 paste(MyRoute,file_path$filename[i],sep="/"))
   }
 
