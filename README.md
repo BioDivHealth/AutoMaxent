@@ -1,6 +1,6 @@
 # AutoMaxent
 
-Rather than a formal package, **AutoMaxent** is a collection of functions that facilitate the general processing and generation of data for Species Distribution Modelling type analysis. Functions can be directly downloaded from this repository or loaded and stored in **R** using the following code:
+Rather than a formal package, **AutoMaxent** is a collection of functions that facilitate the general processing and generation of data for Species Distribution Modelling type analysis. Functions can be directly downloaded from this repository or loaded and stored in your **R** working environment folder using the following code:
 
 ```{r}
 # 0. Load/install the needed packages
@@ -41,6 +41,7 @@ Rather than a formal package, **AutoMaxent** is a collection of functions that f
   functions <- MyRoute %>% list.files(recursive = FALSE,pattern = ".R$",full.names = TRUE)
   lapply(functions,function(x) source(x))
 ```
+**IMPORTANT** - Please make sure to configure your working environment before you run this code. By default, this script will create an `AutoMaxEnt` and `SessionInfo` folders within your working environment. You can check the location of your **R** working environment using the `getwd()` function. To change the location of your working directory, you can use the `setwd()` function with your folder route as input.
 
 **AutoMaxent** and its complementary functions use a combination of custom and specific packages and functions to run the analysis and data preparation. Due to this, it is important to install the right version of the packages. The list of needed packages, along with their version, can be found in the same GitHub repository. This list of functions and packages is likely to change in the future with further updates to the code.
 
@@ -53,7 +54,7 @@ Rather than a formal package, **AutoMaxent** is a collection of functions that f
 
 # a Get the route to the SessionInfo folder
   file_route <- data.frame(unlist(lapply(content(MaxRepo)$tree, function(x) x$path)))
-  MySession <- paste("./SessionInfo") ; MySession %>% dir.create()
+  MySession <- paste(getwd(),"SessionInfo",sep="/") ; MySession %>% dir.create()
 
 # b Download and export the information    
   writeBin(content(GET(paste(raw_route,"Session_info/SessionInfo.rds",sep="/")),"raw"), paste(MySession,"SessionInfo.rds",sep="/"))
