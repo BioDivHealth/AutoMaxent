@@ -10,7 +10,7 @@ Rather than a formal package, **AutoMaxent** is a collection of functions that f
   if(length(new.packages)) install.packages(new.packages)
   
   lapply(list.of.packages,require,character.only=TRUE)
-  conflicts_prefer(dplyr::filter)
+  # conflicts_prefer(dplyr::filter)
   rm(list.of.packages,new.packages)
 
 # 1. Connect to the AutoMaxent GitHub repository
