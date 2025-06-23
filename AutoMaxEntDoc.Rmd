@@ -30,7 +30,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### Set up the R environment
 
-```{r Setup environment, echo=T, include=T,message=F,warning=F,results='hide'}
+```{r Setup environment, echo=T, include=F,message=F,warning=F,results='hide'}
 # 0.a Load the packages needed ----
 list.of.packages<-c("dplyr","sf","data.table","terra","tidyr","parallel","purrr","MASS","nnet","biomod2",
                     "data.table","doParallel","rJava","rstudioapi","raptr","dismo","randomForest","caret")
@@ -503,7 +503,7 @@ MaxEnt_select <- Auto_maxent(presence_dat = presence_dat,
                              n.m=10,
                              mod.select = T,
                              use.boyce = 0.5,
-                             n.mods = 5)
+                             n.mods = 4)
 
 ```
 
