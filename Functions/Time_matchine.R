@@ -39,15 +39,24 @@ Time_matchine<- function(x, #[[RASTER]] Raster stack containing the formatted ti
   y <- y[!y.index,]
   
   # check the date format, it should be y-m-d format
-  y.index <- lapply(y[,colnames(y) %in% y.t] %>% st_drop_geometry() %>% unlist(),function(w) strsplit(w,split="-") %>% unlist() %>% length())
+  y.index <- lapply(y[,colnames(y) %in% y.t] %>% st_drop_geometry() %>% unlist(),function(w) strsplit(w,split=c("-")) %>% unlist() %>% length())
   y.index <- do.call("c",y.index)
   y <- y[y.index == 3,] ; rm(y.index)  
   
-  time.points <- y[,colnames(y) %in% y.t] %>% st_drop_geometry() %>% unlist() %>% unname() %>% as.Date()
+  time.points <- y[,colnames(y) %in% y.t] %>% st_drop_geometry() %>% unlist() %>% unname() %>% as.Date(tryFormats = c("%Y-%m-%d"))#, "%d/%m/%Y"))
+  
+  if(length(time.points)==0){
+    # stop("No valid `time` in `y` data. Format should be years-month-day")
+    warning("No valid `time` in `y` data. Format should be years-month-day")
+    return(NULL)
+  }
   
   # c. Subset the data based on the type and interval specified
-  t.min <- time.points %>% min() 
-  t.max <- time.points %>% max()
+  t.min <- time.points %>% min() %>% format("%Y")
+  t.max <- time.points %>% max() %>% format("%Y")
+  
+  t.min <- paste(t.min,"01-01",sep="-") %>% as.Date()
+  t.max <- paste(t.max,"01-01",sep="-") %>% as.Date()
   
   t.seq <- seq(t.min,t.max,by=paste(paste0("+",jump.i),time.i))
   
@@ -56,9 +65,7 @@ Time_matchine<- function(x, #[[RASTER]] Raster stack containing the formatted ti
   if(time.i=="month") t.max2 <- (t.seq %>% max()) %m+% months(jump.i)
   if(time.i=="day") t.max2 <- (t.seq %>% max()) %m+% days(jump.i)
   
-  if(length(time.points)==0){
-    stop("No valid `time` in `y` data. Format should be years-month-day")
-  }
+  t.seq <- c(t.seq,t.max2)
   
   # Extract the values of the raster's for the spatial points  
   r.values <- list()  
@@ -121,7 +128,7 @@ Time_matchine<- function(x, #[[RASTER]] Raster stack containing the formatted ti
         if(sampling_type %in% c("BwData","BwData_inv") & nrow(r.y)<2){
           print(paste("Not enough records for background sampling","skipping",print(t.seq[i])))
           next()
-          }
+        }
         
         bk_points <- backgroundPOINTS(presence = r.y,
                                       background_n = number_points,
@@ -132,7 +139,7 @@ Time_matchine<- function(x, #[[RASTER]] Raster stack containing the formatted ti
       
       # For the environmental background type
       if(sampling_type %in% "EnvBK"){
-        # The selection of variables can have an impact on the shape and distribution of the PCA scores, therefore we are going to 
+        # The selection of variables can have an impact on the shape and distribution of the PCA scores
         if(nrow(r.y)<6){
           warning("EnvBK: Minimun numbers os presence points lower than threshold for EnvBK calculations. Sampling bk points at random")
           bk_points <- backgroundPOINTS(presence = r.y,
@@ -148,7 +155,7 @@ Time_matchine<- function(x, #[[RASTER]] Raster stack containing the formatted ti
                                density_pc=TRUE)[["points"]] %>% st_cast("POINT")
         }
       }
- 
+      
       #
       env_bk <- terra::extract(x=r.xp,y=bk_points %>% vect()) %>% cbind(st_coordinates(bk_points))
       env_bk <- env_bk %>% dplyr::mutate(ID.x=paste(i,1:nrow(env_bk),sep="-"),
@@ -165,7 +172,12 @@ Time_matchine<- function(x, #[[RASTER]] Raster stack containing the formatted ti
       env_vals <- rbind(env_vals,env_bk)
       
     }else{
-      env_vals <- env_vals %>% mutate(presence=1,.before=0) %>% dplyr::mutate(coordinates=st_coordinates(bk_points))
+      
+      env_vals <- terra::extract(x=r.xp,y=r.y %>% vect()) %>% cbind(st_coordinates(r.y))
+      env_vals <- env_vals %>% dplyr::mutate(ID.x=r.y[,colnames(r.y) %in% id.p] %>% st_drop_geometry() %>% unlist(),
+                                             time_step=paste(t.seq[i],t.seq[i+1],sep=":"),
+                                             presence=1,
+                                             .before=1)
     }
     
     # Store the data   
@@ -175,26 +187,34 @@ Time_matchine<- function(x, #[[RASTER]] Raster stack containing the formatted ti
     print(t.seq[i])
   }
   
-  r.values <- r.values[!lapply(r.values,is.null)%>%unlist()]
-  r.values <- r.values %>% data.table::rbindlist(use.names = TRUE,fill = TRUE)
-  
-  # Get the observations with complete variable configuration
-  r.values <- r.values[r.values %>% complete.cases(),]
-  
-  if(nrow(r.values)<number_points){
-    warning("Time_matchine - Check the data\nNUMBER OF RECORDS LOWER THAN BACKGROUND SAMPLE! Check variables spatial and temporal domains!")
+  if(length(r.values)<1){
+    warning("Temporal match not found, check date format!")
+    return(NULL)
+    
+  }else{
+    
+    r.values <- r.values[!lapply(r.values,is.null)%>%unlist()]
+    r.values <- r.values %>% data.table::rbindlist(use.names = TRUE,fill = TRUE)
+    
+    # Get the observations with complete variable configuration
+    r.values <- r.values[r.values %>% complete.cases(),]
+    
+    if(nrow(r.values)<number_points & bk_sampling==T){
+      warning("Time_matchine - Check the data\nNUMBER OF RECORDS LOWER THAN BACKGROUND SAMPLE! Check variables spatial and temporal domains!")
+    }
+    
+    # Sample the background data to shape the final dataset
+    if(bk_sampling==T){
+      index_bk <- sample(x=r.values %>% filter(presence==0) %>% dplyr::select(ID.x)%>%unlist(),size=number_points)
+      r.values <- r.values %>% filter(presence==1|ID.x%in%index_bk)
+    }
+    # For the non-temporal variables
+    if(continuous_data %in% time(x)){ 
+      r.values <- cbind(r.values,terra::extract(x = x[[time(x) %in% continuous_data]],r.values %>% st_as_sf(coords=coord.xy) %>% vect(),ID=FALSE))
+    }
+    
+    return(r.values)
   }
-  
-  # Sample the background data to shape the final dataset
-  index_bk <- sample(x=r.values %>% filter(presence==0) %>% dplyr::select(ID.x)%>%unlist(),size=number_points)
-  r.values <- r.values %>% filter(presence==1|ID.x%in%index_bk)
-  
-  # For the non-temporal variables
-  if(continuous_data %in% time(x)){ 
-    r.values <- cbind(r.values,terra::extract(x = x[[time(x) %in% continuous_data]],r.values %>% st_as_sf(coords=coord.xy) %>% vect(),ID=FALSE))
-  }
-  
-  return(r.values)
 }
 
 # End of the Function
