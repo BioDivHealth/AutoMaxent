@@ -166,8 +166,8 @@ d.fromXY<-function(x, # Points used to build the density kernell
       # k = kde2d(x=coord[,"X"],y=coord[,"Y"],n=y.size)
       # k_mat = apply(t(k$z), 2, rev) # need to apply a transformation to make the indexes of kde2d compatible
       # 
-      bx <- diff(st_bbox(pol.ref)[c(1,3)]) %>% abs() * 0.1
-      by <- diff(st_bbox(pol.ref)[c(2,4)]) %>% abs() * 0.1
+      bx <- diff(range(coord[,"X"])) %>% abs() * 0.1
+      by <- diff(range(coord[,"Y"])) %>% abs() * 0.1
       
       k<-KernSmooth::bkde2D(coord,bandwidth = c(bx,by),range.x = list(range(coord[,"X"]),range(coord[,"Y"])),
                             gridsize = y.size,truncate=TRUE)
