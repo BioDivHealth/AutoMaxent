@@ -331,8 +331,8 @@ Auto_maxent<-function(
   if(random_features==FALSE){
     supress_features <- list()
     
-    for(i in c(1:3)){
-      supress_features[[i]]<-combinations(x=c("nolinear","noquadratic","noproduct","nothreshold"),
+    for(i in c(1:4)){
+      supress_features[[i]]<-combinations(x=c("nolinear","noquadratic","noproduct","nothreshold","nohinge"),
                                           choose = i) %>% as.data.frame()
     }
     
@@ -365,7 +365,11 @@ Auto_maxent<-function(
       beta.m <- ifelse(random_features==TRUE,sample(1:15,1),supress_features[w,"beta.v"] %>% as.vector() %>% unlist() %>% unname())
     }else{
       if(random_features==TRUE){
-        beta.m <- sample(beta.val,1)
+        if(length(beta.val)<2){
+            beta.m <- beta.val
+          }else{
+            beta.m <- sample(beta.val,1)
+          }
       }else{
         beta.m <- supress_features[w,"beta.v"] %>% as.vector() %>% unlist() %>% unname()
       }
