@@ -353,8 +353,8 @@ Auto_maxent<-function(
   for(w in 1:n.m){
     
     if(random_features==TRUE){ 
-      supress_features<-c("nolinear","noquadratic","noproduct","nothreshold")
-      xFeature <- sample(supress_features,size=sample(1:3,1),replace=F) # Select the number of predictive distributions to fit (this is random)
+      supress_features<-c("nolinear","noquadratic","noproduct","nothreshold","nohinge")
+      xFeature <- sample(supress_features,size=sample(1:4,1),replace=F) # Select the number of predictive distributions to fit (this is random)
       
     }else{
       xFeature<-supress_features[w,-c("beta.v")] %>% as.vector() %>% unlist() %>% unname()
