@@ -377,6 +377,8 @@ Auto_maxent<-function(
     
     argsMX=c(
       "autofeature=false", # Prevent the creation of automatic features or relationships between predictors provided to the model and the response variable
+      "threshold=true",
+      "hinge=true",
       xFeature, # Features to be included in the model
       "defaultprevalence=1.00",
       paste0("betamultiplier=",beta.m), # random beta multiplier set between 1-15, if random_features==FALSE all possible multipliers are applied to each combination of autofeatures (beta.v is created in line 519
@@ -385,7 +387,7 @@ Auto_maxent<-function(
       paste0("replicates=",1), # number of replicates for each model
       "writeplotdata=true",
       paste0("threads=",detectCores(logical=TRUE)-2), # NEW
-      "hinge=true",
+      #"hinge=true",
       paste0("randomtestpoints=",100-(100-Test_n)), # NEW percentage of points to run out of sample AUC values 
       "writeplotdata=true", 
       paste0('threads=',ifelse((detectCores(logical=FALSE)-2)>1,detectCores(logical=FALSE)-2,1)), # Numeric. The number of processor threads to use. 
