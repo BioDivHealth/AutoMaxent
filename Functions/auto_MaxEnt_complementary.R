@@ -150,6 +150,7 @@ vif.sec<-function(yp, # A data.frame or matrix containing the variables from whi
   
   mat.vif<-VIF_dat[[length(VIF_dat)]]
   names(mat.vif)[2:ncol(mat.vif)]<-paste("vif",2:ncol(mat.vif),sep="_")
+  names(Var_excluded) <- names(mat.vif)[2:ncol(mat.vif)]
   
   if(return_inf=="full"){
     return(list(matrix=mat.vif,vars=Var_excluded))
@@ -158,7 +159,7 @@ vif.sec<-function(yp, # A data.frame or matrix containing the variables from whi
   if(return_inf=="select"){
     
     T.a<-apply(mat.vif[,-1],2,FUN=function(x) all(x < threshold,na.rm=TRUE))
-    T.a<-names(w)[!names(w) %in% Var_excluded[[which(T.a==TRUE)[1]%>%unname()]]]
+    T.a<-names(w)[!names(w) %in% Var_excluded[[tail(which(T.a==FALSE),n=1)%>%names()]]] # Carefull with the indexes, we need to retrieve the list of excluded variables from the iteration before the first TRUE
     
     return(T.a)
   }

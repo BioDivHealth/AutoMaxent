@@ -95,9 +95,13 @@ backgroundPOINTS<-function(presence, # [sf points] distribution points of the sp
       a.r[a.r<0.15] <-  a.r[a.r<0.15] + 0.05 # Add a bit to the areas with vrey low probability
       
       # Generating 10000 background points randomly considering the probability distribution of the density raster
-      TrainBk <- raptr::randomPoints(mask=a.r,n=round(background_n*0.8,digits=0),prob=T)
-      TtestBk <- raptr::randomPoints(mask=a.r,n=round(background_n*0.2,digits=0),prob=T)
-      
+      TrainBk <- raptr::randomPoints(mask=a.r,n=round(background_n*TrainTest,digits=0),prob=T)
+      if(round(background_n*c(1-TrainTest),digits=0)>0){
+         TtestBk <- raptr::randomPoints(mask=a.r,n=round(background_n*c(1-TrainTest),digits=0),prob=T)
+      }else{
+         TtestBk <- data.frame(x=0,y=0)
+         }
+       
       }
    
       if(weights.p=="Random"){
@@ -113,8 +117,13 @@ backgroundPOINTS<-function(presence, # [sf points] distribution points of the sp
          }
       
       # Generating 10000 background points randomly considering the probability distribution of the density raster
-      TrainBk <- raptr::randomPoints(mask=bias.sampling,n=round(background_n*0.8,digits=0),prob=T)
-      TtestBk <- raptr::randomPoints(mask=bias.sampling,n=round(background_n*0.2,digits=0),prob=T)
+      TrainBk <- raptr::randomPoints(mask=bias.sampling,n=round(background_n*TrainTest,digits=0),prob=T)
+      
+      if(round(background_n*c(1-TrainTest),digits=0)>0){
+         TtestBk <- raptr::randomPoints(mask=bias.sampling,n=round(background_n*c(1-TrainTest),digits=0),prob=T)
+      }else{
+         TtestBk <- data.frame(x=0,y=0)
+      }
       
    }
       
@@ -124,7 +133,8 @@ backgroundPOINTS<-function(presence, # [sf points] distribution points of the sp
       TtestBk <- TtestBk %>% as.data.frame() %>% st_as_sf(coords=c("x","y"),crs=st_crs(presence)) 
       }
    
-      return(list(Train=TrainBk,Test=TtestBk,Samp_area=r.buff)) 
+   if(weights.p %in% c("BwData","BwData_inv")) return(list(Train=TrainBk,Test=TtestBk,Samp_area=r.buff,Kern=a.r))   
+   if(weights.p %in% c("Random")) return(list(Train=TrainBk,Test=TtestBk,Samp_area=r.buff)) 
   }
  
 ###//\/\/\/\/\/\/\////\/\/\/\/\/\/\//\/\/\/\//\////\/\/\///////////////////\\\\\\##-#
