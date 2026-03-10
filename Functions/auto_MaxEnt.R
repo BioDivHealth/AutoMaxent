@@ -38,6 +38,7 @@ Auto_maxent<-function(
         # MaxEnt Modelling
         #~~~~~~~~~~~~~~~~~~#
         random_features = FALSE, # [LOGICAL] Should MaxEnt select its adjustment features at random? When FALSE, model fit features are clipped and all possible combinations are tested in independent models
+        seed.r = 185, # [NUMERICAL] Seed for the randomizer, feature and b-value selection
         beta.val = 7, # [NUMERICAL] Which value or collection of b-multiplier values should we use for the models
         n.m = 10, # [NUMERIC] Number of models to run, if `random_features` set to FALSE this gets overwritten and all the possible combinations of features and beta-multiplier values are tested
         Mod.route = NULL, # [CHARACTER] route to store the models, if no route is provided the temporal folder will be used                      
@@ -348,7 +349,7 @@ Auto_maxent<-function(
   gc()
   
   # 4.1 Run the different models----  
-  set.seed(185)
+  set.seed(seed.r)
   
   for(w in 1:n.m){
     
@@ -482,7 +483,7 @@ Auto_maxent<-function(
         AICc <- ifelse(AIC.valid == FALSE | is.infinite(AICc), NA, AICc)
         
         # Create the output table
-        AICc_mods <- data.frame(mod=ifelse(is.null(name.mod),paste0("mod.",w),paste0(name.mod,"_",w)),
+        AICc_mods <- data.frame(model.id=ifelse(is.null(name.mod),paste0("mod.",w),paste0(name.mod,"_",w)),
                                 ncoefs=ncoefs.maxent,
                                 logOdds=LL,
                                 AICc=AICc,
@@ -518,7 +519,7 @@ Auto_maxent<-function(
         
         # Create the output table
         
-        AICc_mods <- rbind(AICc_mods,data.frame(mod=ifelse(is.null(name.mod),paste0("mod.",w),paste0(name.mod,"_",w)),
+        AICc_mods <- rbind(AICc_mods,data.frame(model.id=ifelse(is.null(name.mod),paste0("mod.",w),paste0(name.mod,"_",w)),
                                                 ncoefs=ncoefs.maxent,
                                                 logOdds=LL,
                                                 AICc=AICc,
@@ -607,7 +608,7 @@ Auto_maxent<-function(
     AICc <- ifelse(AIC.valid == FALSE | is.infinite(AICc), NA, AICc)
     
     # Create the output table
-    AICc_mods <- rbind(AICc_mods,data.frame(mod="NULL_mod",
+    AICc_mods <- rbind(AICc_mods,data.frame(model.id="NULL_mod",
                                             ncoefs=ncoefs.maxent,
                                             logOdds=LL,
                                             AICc=AICc,
@@ -629,7 +630,7 @@ Auto_maxent<-function(
       n.mods <- nrow(AICc_mods)-1
     }
     
-    select_models <-  AICc_mods[1:n.mods,"mod"]      
+    select_models <-  AICc_mods[1:n.mods,"model.id"]      
     
     if("NULL_mod" %in% select_models){
       print("WARNING: The null models is amongst the selected models! Dropping this model, number of selected models -1.")
@@ -656,7 +657,7 @@ Auto_maxent<-function(
   mod.params <- mod.params %>% filter(model.id %in% select_models) 
   
   if(mod.select==TRUE){
-    AICc_mods <- AICc_mods %>% filter(mod %in% select_models)
+    AICc_mods <- AICc_mods %>% filter(model.id %in% select_models)
   }else{
     AICc_mods <- NULL
   }
