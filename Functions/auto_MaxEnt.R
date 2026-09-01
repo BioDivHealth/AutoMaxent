@@ -686,7 +686,7 @@ Auto_maxent<-function(
              bk.points=if(time_macth == FALSE){bk_points}else{raw.time[raw.time$presence==0,colnames(raw.time)%in%c("X","Y")]},
              mod.preds=preds,
              avr.preds=comb.pred,
-             mod_performance)
+             detailled_performance = mod_performance)
     
     return(xp)
   }else{
