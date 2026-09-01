@@ -86,7 +86,7 @@ bk_env<-function(p.points, # Presence points for a given species
         ENV_pols<-rbind(ENV_pols,bk.pol)
     
         }else{
-        # Create a density kernell of the environmental space whit the 
+        # Create a density kernell of the environmental space whit the PC values
           # Check the quantiles of our coordinates to avoid errors in kde2d
           if(bandwidth.nrd(env_xy[,1])==0){
             env_xy[,1]<-env_xy[,1]+rnorm(n=length(env_xy[,1]),mean=0.05,sd=0.0025)

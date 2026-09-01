@@ -350,7 +350,8 @@ Auto_maxent<-function(
   
   # 4.1 Run the different models----  
   set.seed(seed.r)
-  
+  if(return.all == TRUE)  mod_performance <- list()
+    
   for(w in 1:n.m){
     
     if(random_features==TRUE){ 
@@ -438,6 +439,8 @@ Auto_maxent<-function(
                                index_vals=obs_index[-Train_index],
                                threshold_seq = seq(0.01,0.99,by=0.01))  
     
+    if(return.all == TRUE) mod_performance[[w]] <- y.acc # Save the model performance details
+    
     TSS.threshold.TEST <- seq(0.01,0.99,by=0.01)[which.max(y.acc[rownames(y.acc) %in% "TSS",])]
     
     TSS.max.TEST <- y.acc[rownames(y.acc) %in% "TSS",] %>% max(na.rm=TRUE)
@@ -450,7 +453,7 @@ Auto_maxent<-function(
     TSS.threshold.FULL <- read.csv(paste(rx,"maxentResults.csv",sep="/"),header = TRUE)$Maximum.training.sensitivity.plus.specificity.Cloglog.threshold
     
     # Check model performance----
-    cbi <- boyce_index(pred = predict(Train.m,pred.dat,wopt=list(tempdir=tempdir())),obs=y_points[Test_index,] %>% st_coordinates())
+    cbi <- boyce_index(pred = terra::predict(object=pred.dat,model=Train.m,na.rm=T,wopt=list(tempdir=tempdir())),obs=y_points[Test_index,] %>% st_coordinates())
     gc() ; gc()
     
     # 5.3 Built the table to produce the AIC values----
@@ -667,8 +670,7 @@ Auto_maxent<-function(
   # 7. Prepare the return object ----
   if(return.all==TRUE){
     # a. Run model predictions
-    
-    preds <- lapply(models,predict,pred.dat,wopt=list(tempdir=tempdir())) %>% rast()
+    preds <- lapply(models,function(x) terra::predict(object=pred.dat,model=x,na.rm=T,wopt=list(tempdir=tempdir()))) %>% rast()
 
     # b. Combine model predictions
     comb.pred <- mean(preds,na.rm=TRUE)
@@ -683,7 +685,8 @@ Auto_maxent<-function(
              study.area=sty.a,
              bk.points=if(time_macth == FALSE){bk_points}else{raw.time[raw.time$presence==0,colnames(raw.time)%in%c("X","Y")]},
              mod.preds=preds,
-             avr.preds=comb.pred)
+             avr.preds=comb.pred,
+             mod_performance)
     
     return(xp)
   }else{
