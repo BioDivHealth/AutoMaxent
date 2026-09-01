@@ -439,7 +439,10 @@ Auto_maxent<-function(
                                index_vals=obs_index[-Train_index],
                                threshold_seq = seq(0.01,0.99,by=0.01))  
     
-    if(return.all == TRUE) mod_performance[[w]] <- y.acc # Save the model performance details
+    if(return.all == TRUE){
+      mod_performance[[w]] <- y.acc}
+      names(mod_performance)[w] <- ifelse(is.null(name.mod),paste0("mod.",w),paste0(name.mod,"_",w))
+    # Save the model performance details
     
     TSS.threshold.TEST <- seq(0.01,0.99,by=0.01)[which.max(y.acc[rownames(y.acc) %in% "TSS",])]
     
